@@ -28,6 +28,8 @@ pub enum CommandAction {
     PreviousShell,
     /// Go to the next shell in the shell ring buffer
     NextShell,
+    /// Jump to the specified shell in the shell ring buffer
+    GotoShell(usize),
     /// Leave the current shell. If it's the last shell, exit out of Nu
     LeaveShell(i32),
 }
@@ -51,6 +53,7 @@ impl PrettyDebug for CommandAction {
             CommandAction::AddPlugins(..) => DbgDocBldr::description("add plugins"),
             CommandAction::PreviousShell => DbgDocBldr::description("previous shell"),
             CommandAction::NextShell => DbgDocBldr::description("next shell"),
+            CommandAction::GotoShell(_) => DbgDocBldr::description("goto shell"),
             CommandAction::LeaveShell(_) => DbgDocBldr::description("leave shell"),
             CommandAction::UnloadConfig(cfg) => {
                 DbgDocBldr::description(format!("unload config {:?}", cfg))
@@ -130,7 +133,8 @@ mod tests {
 
     #[test]
     fn return_value_can_be_used_in_assert_eq() {
-        let v: ReturnValue = ReturnSuccess::value(UntaggedValue::nothing());
-        assert_eq!(v, v);
+        let v1: ReturnValue = ReturnSuccess::value(UntaggedValue::nothing());
+        let v2: ReturnValue = ReturnSuccess::value(UntaggedValue::nothing());
+        assert_eq!(v1, v2);
     }
 }

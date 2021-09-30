@@ -1,14 +1,10 @@
-use std::borrow::Cow;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 use bigdecimal::BigDecimal;
 use indexmap::IndexMap;
 use log::trace;
 use nu_errors::{ArgumentError, ParseError};
-use nu_path::{expand_path, expand_path_string};
+use nu_path::expand_path;
 use nu_protocol::hir::{
     self, Binary, Block, Call, ClassifiedCommand, Expression, ExternalRedirection, Flag, FlagKind,
     Group, InternalCommand, Member, NamedArguments, Operator, Pipeline, RangeOperator,
@@ -18,6 +14,7 @@ use nu_protocol::{NamedType, PositionalType, Signature, SyntaxShape, UnspannedPa
 use nu_source::{HasSpan, Span, Spanned, SpannedItem};
 use num_bigint::BigInt;
 
+use crate::parse::source::parse_source_internal;
 use crate::{lex::lexer::NewlineMode, parse::def::parse_parameter};
 use crate::{
     lex::lexer::{lex, parse_block},
@@ -38,6 +35,7 @@ use self::{
 };
 
 mod def;
+mod source;
 mod util;
 
 pub use self::util::garbage;
@@ -955,8 +953,8 @@ fn parse_arg(
             )
         }
         SyntaxShape::GlobPattern => {
-            let trimmed = Cow::Owned(trim_quotes(&lite_arg.item));
-            let expanded = expand_path_string(trimmed).to_string();
+            let trimmed = trim_quotes(&lite_arg.item);
+            let expanded = expand_path(trimmed).to_string_lossy().to_string();
             (
                 SpannedExpression::new(Expression::glob_pattern(expanded), lite_arg.span),
                 None,
@@ -973,7 +971,7 @@ fn parse_arg(
         SyntaxShape::FilePath => {
             let trimmed = trim_quotes(&lite_arg.item);
             let path = PathBuf::from(trimmed);
-            let expanded = expand_path(Cow::Owned(path)).to_path_buf();
+            let expanded = expand_path(path);
             (
                 SpannedExpression::new(Expression::FilePath(expanded), lite_arg.span),
                 None,
@@ -992,7 +990,7 @@ fn parse_arg(
                 SyntaxShape::Table,
                 SyntaxShape::String,
             ];
-            for shape in shapes.iter() {
+            for shape in &shapes {
                 if let (s, None) = parse_arg(*shape, scope, lite_arg) {
                     return (s, None);
                 }
@@ -1602,7 +1600,7 @@ fn parse_internal_command(
 
             positional.push(arg);
             current_positional += 1;
-        } else if let Some((rest_type, _)) = &signature.rest_positional {
+        } else if let Some((_, rest_type, _)) = &signature.rest_positional {
             let (arg, err) = parse_arg(*rest_type, scope, &lite_cmd.parts[idx]);
             if error.is_none() {
                 error = err;
@@ -1660,8 +1658,8 @@ fn parse_external_call(
 ) -> (Option<ClassifiedCommand>, Option<ParseError>) {
     let mut error = None;
     let name = lite_cmd.parts[0].clone().map(|v| {
-        let trimmed = Cow::Owned(trim_quotes(&v));
-        expand_path_string(trimmed).to_string()
+        let trimmed = trim_quotes(&v);
+        expand_path(trimmed).to_string_lossy().to_string()
     });
 
     let mut args = vec![];
@@ -1742,7 +1740,7 @@ fn expand_aliases_in_call(call: &mut LiteCommand, scope: &dyn ParserScope) {
     if let Some(name) = call.parts.get(0) {
         if let Some(mut expansion) = scope.get_alias(name) {
             // set the expansion's spans to point to the alias itself
-            for item in expansion.iter_mut() {
+            for item in &mut expansion {
                 item.span = name.span;
             }
 
@@ -1871,38 +1869,10 @@ fn parse_call(
         let (mut internal_command, err) = parse_internal_command(&lite_cmd, scope, &signature, 0);
 
         if internal_command.name == "source" {
-            if lite_cmd.parts.len() != 2 {
-                return (
-                    Some(ClassifiedCommand::Internal(internal_command)),
-                    Some(ParseError::argument_error(
-                        lite_cmd.parts[0].clone(),
-                        ArgumentError::MissingMandatoryPositional("a path for sourcing".into()),
-                    )),
-                );
-            }
-            if lite_cmd.parts[1].item.starts_with('$') {
-                return (
-                    Some(ClassifiedCommand::Internal(internal_command)),
-                    Some(ParseError::mismatch(
-                        "a filepath constant",
-                        lite_cmd.parts[1].clone(),
-                    )),
-                );
-            }
-            if let Ok(contents) = std::fs::read_to_string(&expand_path(Cow::Borrowed(Path::new(
-                &lite_cmd.parts[1].item,
-            )))) {
-                let _ = parse(&contents, 0, scope);
-            } else {
-                return (
-                    Some(ClassifiedCommand::Internal(internal_command)),
-                    Some(ParseError::argument_error(
-                        lite_cmd.parts[1].clone(),
-                        ArgumentError::BadValue("can't load source file".into()),
-                    )),
-                );
-            }
-        } else if lite_cmd.parts[0].item == "alias" {
+            let err = parse_source_internal(&lite_cmd, &internal_command, scope).err();
+
+            return (Some(ClassifiedCommand::Internal(internal_command)), err);
+        } else if lite_cmd.parts[0].item == "alias" || lite_cmd.parts[0].item == "unalias" {
             let error = parse_alias(&lite_cmd, scope);
             if error.is_none() {
                 return (Some(ClassifiedCommand::Internal(internal_command)), None);
@@ -2048,26 +2018,59 @@ fn expand_shorthand_forms(
 }
 
 fn parse_alias(call: &LiteCommand, scope: &dyn ParserScope) -> Option<ParseError> {
-    if call.parts.len() == 2 && (call.parts[1].item == "--help" || (call.parts[1].item == "-h")) {
-        return None;
-    }
+    if call.parts[0].item == "alias" {
+        if (call.parts.len() == 1)
+            || (call.parts.len() == 2
+                && (call.parts[1].item == "--help" || (call.parts[1].item == "-h")))
+        {
+            return None;
+        }
 
-    if call.parts.len() < 4 {
-        return Some(ParseError::mismatch("alias", call.parts[0].clone()));
-    }
+        if call.parts.get(2).map(|part| part.item.as_str()) != Some("=") {
+            if let Some(equals_span) = [call.parts.get(1), call.parts.get(2)]
+                .iter()
+                .flatten()
+                .filter_map(|part| {
+                    part.find('=')
+                        .map(|offset| Span::for_char(part.span.start() + offset))
+                })
+                .next()
+            {
+                return Some(ParseError::general_error(
+                    "Invalid alias syntax",
+                    "Expected space on both sides of =".spanned(equals_span),
+                ));
+            }
+        }
 
-    if call.parts[0].item != "alias" {
-        return Some(ParseError::mismatch("alias", call.parts[0].clone()));
-    }
+        if call.parts.len() < 4 {
+            return Some(ParseError::mismatch("alias", call.parts[0].clone()));
+        }
 
-    if call.parts[2].item != "=" {
-        return Some(ParseError::mismatch("=", call.parts[2].clone()));
+        if call.parts[0].item != "alias" {
+            return Some(ParseError::mismatch("alias", call.parts[0].clone()));
+        }
+
+        if call.parts[2].item != "=" {
+            return Some(ParseError::mismatch("=", call.parts[2].clone()));
+        }
+    } else {
+        // unalias
+        if call.parts.len() != 2 {
+            return Some(ParseError::mismatch("unalias", call.parts[0].clone()));
+        }
     }
 
     let name = call.parts[1].item.clone();
     let args: Vec<_> = call.parts.iter().skip(3).cloned().collect();
 
-    scope.add_alias(&name, args);
+    match call.parts[0].item.as_str() {
+        "alias" => scope.add_alias(&name, args),
+        "unalias" => {
+            scope.remove_alias(&name);
+        }
+        _ => unreachable!(),
+    };
 
     None
 }
@@ -2080,7 +2083,7 @@ pub fn classify_block(
     let mut error = None;
 
     // Check for custom commands first
-    for group in lite_block.block.iter() {
+    for group in &lite_block.block {
         for pipeline in &group.pipelines {
             for call in &pipeline.commands {
                 if let Some(first) = call.parts.first() {
@@ -2180,7 +2183,7 @@ pub fn classify_block(
     }
 
     let definitions = scope.get_definitions();
-    for definition in definitions.into_iter() {
+    for definition in definitions {
         let name = definition.params.name.clone();
         if !output.definitions.contains_key(&name) {
             output.definitions.insert(name, definition.clone());
@@ -2350,7 +2353,7 @@ fn unit_parse_byte_units() {
         },
     ];
 
-    for case in cases.iter() {
+    for case in &cases {
         let input_len = case.string.len();
         let value_len = case.value.to_string().len();
         let input = case.string.clone().spanned(Span::new(0, input_len));
@@ -2438,7 +2441,7 @@ fn unit_parse_byte_units_decimal() {
         },
     ];
 
-    for case in cases.iter() {
+    for case in &cases {
         let input_len = case.string.len();
         let value_len = case.value_str.to_string().len();
         let input = case.string.clone().spanned(Span::new(0, input_len));

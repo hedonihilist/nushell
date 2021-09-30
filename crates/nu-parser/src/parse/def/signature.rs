@@ -231,7 +231,7 @@ fn parse_rest(
     tokens: &[Token],
     tokens_as_str: &Spanned<String>,
 ) -> (
-    Option<(SyntaxShape, Description)>,
+    Option<(String, SyntaxShape, Description)>,
     usize,
     Option<ParseError>,
 ) {
@@ -251,7 +251,7 @@ fn parse_rest(
     let mut type_ = SyntaxShape::Any;
     let mut comment = "".to_string();
 
-    let error = parse_rest_name(&tokens[i]);
+    let (name, error) = parse_rest_name(&tokens[i]);
     err = err.or(error);
     i += 1;
 
@@ -268,7 +268,7 @@ fn parse_rest(
         comment = parsed_comment.unwrap_or_else(|| "".to_string());
     }
 
-    (Some((type_, comment)), i, err)
+    (Some((name.item, type_, comment)), i, err)
 }
 
 fn parse_optional_type(tokens: &[Token]) -> (Option<SyntaxShape>, usize, Option<ParseError>) {
@@ -352,17 +352,17 @@ fn to_signature(
     name: &str,
     params: Vec<Parameter>,
     flags: Vec<Flag>,
-    rest: Option<(SyntaxShape, Description)>,
+    rest: Option<(String, SyntaxShape, Description)>,
 ) -> Signature {
     let mut sign = Signature::new(name);
 
-    for param in params.into_iter() {
+    for param in params {
         // pub positional: Vec<(PositionalType, Description)>,
         sign.positional
             .push((param.pos_type, param.desc.unwrap_or_else(|| "".to_string())));
     }
 
-    for flag in flags.into_iter() {
+    for flag in flags {
         sign.named.insert(
             flag.long_name,
             (flag.named_type, flag.desc.unwrap_or_else(|| "".to_string())),

@@ -16,13 +16,13 @@ use nu_source::AnchorLocation;
 
 #[cfg(feature = "dataframe")]
 use crate::commands::{
-    DataFrameGroupBy, DataFrameIsNull, DataFrameShift, DataFrameToDF, DataFrameWithColumn,
-    StrToDatetime,
+    DataFrameDropNulls, DataFrameGroupBy, DataFrameIsNull, DataFrameShift, DataFrameToDF,
+    DataFrameWithColumn, StrToDatetime,
 };
 
 use crate::commands::{
-    Append, BuildString, Each, Echo, First, Get, Keep, Last, Let, Math, MathMode, Nth, Select,
-    StrCollect, Wrap,
+    Append, BuildString, Collect, Each, Echo, First, Get, If, IntoInt, Keep, Last, Let, Math,
+    MathMode, Nth, Select, StrCollect, Wrap,
 };
 use nu_engine::{run_block, whole_stream_command, Command, EvaluationContext, WholeStreamCommand};
 use nu_stream::InputStream;
@@ -41,6 +41,8 @@ pub fn test_examples(cmd: Command) -> Result<(), ShellError> {
         whole_stream_command(BuildString {}),
         whole_stream_command(First {}),
         whole_stream_command(Get {}),
+        whole_stream_command(If {}),
+        whole_stream_command(IntoInt {}),
         whole_stream_command(Keep {}),
         whole_stream_command(Each {}),
         whole_stream_command(Last {}),
@@ -48,6 +50,7 @@ pub fn test_examples(cmd: Command) -> Result<(), ShellError> {
         whole_stream_command(Let {}),
         whole_stream_command(Select),
         whole_stream_command(StrCollect),
+        whole_stream_command(Collect),
         whole_stream_command(Wrap),
         cmd,
     ]);
@@ -60,7 +63,7 @@ pub fn test_examples(cmd: Command) -> Result<(), ShellError> {
         if let Some(expected) = &sample_pipeline.result {
             let result = evaluate_block(block, &mut ctx)?;
 
-            ctx.with_errors(|reasons| reasons.iter().cloned().take(1).next())
+            ctx.with_errors(|reasons| reasons.iter().cloned().next())
                 .map_or(Ok(()), Err)?;
 
             if expected.len() != result.len() {
@@ -74,7 +77,7 @@ pub fn test_examples(cmd: Command) -> Result<(), ShellError> {
                 );
             }
 
-            for (e, a) in expected.iter().zip(result.iter()) {
+            for (e, a) in expected.iter().zip(&result) {
                 if !values_equal(e, a) {
                     let row_errored = format!("expected: {:#?}\nactual: {:#?}", e, a);
                     let failed_call = format!("command: {}\n", sample_pipeline.example);
@@ -108,6 +111,7 @@ pub fn test(cmd: impl WholeStreamCommand + 'static) -> Result<(), ShellError> {
         whole_stream_command(cmd),
         whole_stream_command(Select),
         whole_stream_command(StrCollect),
+        whole_stream_command(Collect),
         whole_stream_command(Wrap),
     ]);
 
@@ -138,7 +142,7 @@ pub fn test(cmd: impl WholeStreamCommand + 'static) -> Result<(), ShellError> {
                 );
             }
 
-            for (e, a) in expected.iter().zip(result.iter()) {
+            for (e, a) in expected.iter().zip(&result) {
                 if !values_equal(e, a) {
                     let row_errored = format!("expected: {:#?}\nactual: {:#?}", e, a);
                     let failed_call = format!("command: {}\n", sample_pipeline.example);
@@ -171,6 +175,7 @@ pub fn test_dataframe(cmd: impl WholeStreamCommand + 'static) -> Result<(), Shel
         whole_stream_command(DataFrameIsNull),
         whole_stream_command(DataFrameGroupBy),
         whole_stream_command(DataFrameWithColumn),
+        whole_stream_command(DataFrameDropNulls),
         // Base commands for context
         whole_stream_command(Math),
         whole_stream_command(MathMode {}),
@@ -182,6 +187,7 @@ pub fn test_dataframe(cmd: impl WholeStreamCommand + 'static) -> Result<(), Shel
         whole_stream_command(Let {}),
         whole_stream_command(Select),
         whole_stream_command(StrCollect),
+        whole_stream_command(Collect),
         whole_stream_command(Wrap),
         whole_stream_command(StrToDatetime),
     ]);
@@ -249,6 +255,8 @@ pub fn test_anchors(cmd: Command) -> Result<(), ShellError> {
         whole_stream_command(BuildString {}),
         whole_stream_command(First {}),
         whole_stream_command(Get {}),
+        whole_stream_command(If {}),
+        whole_stream_command(IntoInt {}),
         whole_stream_command(Keep {}),
         whole_stream_command(Each {}),
         whole_stream_command(Last {}),
@@ -256,6 +264,7 @@ pub fn test_anchors(cmd: Command) -> Result<(), ShellError> {
         whole_stream_command(Let {}),
         whole_stream_command(Select),
         whole_stream_command(StrCollect),
+        whole_stream_command(Collect),
         whole_stream_command(Wrap),
         cmd,
     ]);
@@ -270,10 +279,10 @@ pub fn test_anchors(cmd: Command) -> Result<(), ShellError> {
         if sample_pipeline.result.is_some() {
             let result = evaluate_block(block, &mut ctx)?;
 
-            ctx.with_errors(|reasons| reasons.iter().cloned().take(1).next())
+            ctx.with_errors(|reasons| reasons.iter().cloned().next())
                 .map_or(Ok(()), Err)?;
 
-            for actual in result.iter() {
+            for actual in &result {
                 if !is_anchor_carried(actual, mock_path()) {
                     let failed_call = format!("command: {}\n", pipeline_with_anchor);
 
@@ -346,10 +355,10 @@ fn values_equal(expected: &Value, actual: &Value) -> bool {
 
             e.entries
                 .iter()
-                .zip(a.entries.iter())
+                .zip(&a.entries)
                 .all(|((ek, ev), (ak, av))| ek == ak && values_equal(ev, av))
         }
-        (Table(e), Table(a)) => e.iter().zip(a.iter()).all(|(e, a)| values_equal(e, a)),
+        (Table(e), Table(a)) => e.iter().zip(a).all(|(e, a)| values_equal(e, a)),
         (e, a) => unimplemented!("{} {}", e.type_name(), a.type_name()),
     }
 }

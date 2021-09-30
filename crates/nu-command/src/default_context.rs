@@ -18,8 +18,12 @@ pub fn create_default_context(interactive: bool) -> Result<EvaluationContext, Bo
             whole_stream_command(Def),
             whole_stream_command(Source),
             whole_stream_command(Alias),
+            whole_stream_command(Unalias),
             whole_stream_command(Ignore),
+            whole_stream_command(Tutor),
+            whole_stream_command(Find),
             // System/file operations
+            whole_stream_command(ErrorMake),
             whole_stream_command(Exec),
             whole_stream_command(Pwd),
             whole_stream_command(Ls),
@@ -73,6 +77,7 @@ pub fn create_default_context(interactive: bool) -> Result<EvaluationContext, Bo
             // Shells
             whole_stream_command(Next),
             whole_stream_command(Previous),
+            whole_stream_command(Goto),
             whole_stream_command(Shells),
             whole_stream_command(Enter),
             whole_stream_command(Exit),
@@ -129,11 +134,14 @@ pub fn create_default_context(interactive: bool) -> Result<EvaluationContext, Bo
             whole_stream_command(Select),
             whole_stream_command(Get),
             whole_stream_command(Update),
+            whole_stream_command(UpdateCells),
             whole_stream_command(Insert),
             whole_stream_command(Into),
             whole_stream_command(IntoBinary),
+            whole_stream_command(IntoColumnPath),
             whole_stream_command(IntoInt),
             whole_stream_command(IntoFilepath),
+            whole_stream_command(IntoFilesize),
             whole_stream_command(IntoString),
             whole_stream_command(SplitBy),
             // Row manipulation
@@ -150,6 +158,7 @@ pub fn create_default_context(interactive: bool) -> Result<EvaluationContext, Bo
             whole_stream_command(Every),
             whole_stream_command(Nth),
             whole_stream_command(Drop),
+            whole_stream_command(DropNth),
             whole_stream_command(Format),
             whole_stream_command(FileSize),
             whole_stream_command(Where),
@@ -183,6 +192,7 @@ pub fn create_default_context(interactive: bool) -> Result<EvaluationContext, Bo
             whole_stream_command(RollUp),
             whole_stream_command(Rotate),
             whole_stream_command(RotateCounterClockwise),
+            whole_stream_command(Zip),
             whole_stream_command(Collect),
             // Data processing
             whole_stream_command(Histogram),
@@ -264,6 +274,16 @@ pub fn create_default_context(interactive: bool) -> Result<EvaluationContext, Bo
             whole_stream_command(Seq),
             whole_stream_command(SeqDates),
             whole_stream_command(TermSize),
+            // Network
+            #[cfg(feature = "fetch")]
+            whole_stream_command(Fetch),
+            #[cfg(feature = "post")]
+            whole_stream_command(Post),
+            // System
+            #[cfg(feature = "ps")]
+            whole_stream_command(Ps),
+            #[cfg(feature = "sys")]
+            whole_stream_command(Sys),
         ]);
 
         //Dataframe commands
@@ -340,6 +360,10 @@ pub fn create_default_context(interactive: bool) -> Result<EvaluationContext, Bo
             whole_stream_command(DataFrameGetOrdinal),
             whole_stream_command(DataFrameGetNanoSecond),
             whole_stream_command(DataFrameStrFTime),
+            whole_stream_command(DataFrameDescribe),
+            whole_stream_command(DataFrameRolling),
+            whole_stream_command(DataFrameCumulative),
+            whole_stream_command(DataFrameRename),
         ]);
 
         #[cfg(feature = "clipboard-cli")]
